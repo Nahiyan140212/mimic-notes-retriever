@@ -18,12 +18,23 @@ export class OllamaLLMService {
     this.defaultModel = defaultModel;
   }
 
+  // Allow dynamic URL updates
+  setBaseUrl(url: string): void {
+    this.baseUrl = url;
+    console.log('🔧 OllamaLLM: Base URL updated to:', this.baseUrl);
+  }
+
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   async generateStructuredResponse(
     query: string, 
     similarRecords: any[], 
     model: string = this.defaultModel
   ): Promise<string> {
     console.log('🤖 OllamaLLM: Starting structured response generation...');
+    console.log('🤖 OllamaLLM: Using base URL:', this.baseUrl);
     console.log('🤖 OllamaLLM: Using model:', model);
     console.log('🤖 OllamaLLM: Processing', similarRecords.length, 'records');
 
@@ -128,8 +139,9 @@ Please provide a comprehensive, structured clinical analysis of these records in
       console.error('❌ OllamaLLM: Generation failed:', error);
       
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        console.error('❌ OllamaLLM: Network error - this is likely a CORS issue or Ollama is not running');
-        throw new Error('Cannot connect to Ollama service - ensure it is running at ' + this.baseUrl + ' and CORS is configured');
+        console.error('❌ OllamaLLM: Network error - this is likely a CORS issue or Ollama is not accessible');
+        const isNgrok = this.baseUrl.includes('ngrok');
+        throw new Error(`Cannot connect to Ollama service at ${this.baseUrl} - ${isNgrok ? 'ensure ngrok tunnel is running and URL is correct' : 'ensure Ollama is running and accessible'}`);
       }
       
       throw new Error(`Failed to generate LLM response: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -142,7 +154,7 @@ Please provide a comprehensive, structured clinical analysis of these records in
       console.log('🔌 OllamaLLM: Attempting to fetch /api/tags endpoint...');
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for ngrok
       
       const response = await fetch(`${this.baseUrl}/api/tags`, {
         method: 'GET',
@@ -171,9 +183,16 @@ Please provide a comprehensive, structured clinical analysis of these records in
         if (error.name === 'AbortError') {
           console.error('🔌 OllamaLLM: Connection timeout - Ollama may be slow or not responding');
         } else if (error.message.includes('Failed to fetch')) {
-          console.error('🔌 OllamaLLM: Network error - likely CORS issue or Ollama not running');
-          console.error('🔌 OllamaLLM: Make sure Ollama is running with: ollama serve');
-          console.error('🔌 OllamaLLM: And configure CORS if needed');
+          const isNgrok = this.baseUrl.includes('ngrok');
+          console.error('🔌 OllamaLLM: Network error -', isNgrok ? 'ngrok tunnel may be down or URL incorrect' : 'likely CORS issue or Ollama not running');
+          
+          if (isNgrok) {
+            console.error('🔌 OllamaLLM: Make sure ngrok tunnel is running: ngrok http 11434');
+            console.error('🔌 OllamaLLM: And Ollama is running: ollama serve');
+          } else {
+            console.error('🔌 OllamaLLM: Make sure Ollama is running with: ollama serve');
+            console.error('🔌 OllamaLLM: And configure CORS if needed');
+          }
         }
       }
       

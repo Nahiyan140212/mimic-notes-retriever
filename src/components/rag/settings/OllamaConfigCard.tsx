@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Cpu, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Cpu, CheckCircle, XCircle, AlertCircle, Globe, Home, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ollamaLLMService } from '@/services/ollamaLLM';
+import { useOllamaConfig } from '@/hooks/useOllamaConfig';
 
 interface OllamaConfigCardProps {
   ollamaUrl: string;
@@ -27,6 +29,7 @@ export const OllamaConfigCard = ({
   onLlmModelChange
 }: OllamaConfigCardProps) => {
   const { toast } = useToast();
+  const ollamaConfig = useOllamaConfig();
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connected' | 'failed' | 'testing'>('idle');
 
@@ -64,7 +67,9 @@ export const OllamaConfigCard = ({
         setConnectionStatus('failed');
         toast({
           title: "Connection failed",
-          description: "Could not connect to Ollama. Make sure it's running with 'ollama serve'",
+          description: ollamaConfig.config.isProduction 
+            ? "Could not connect to Ollama. Check your ngrok tunnel is running."
+            : "Could not connect to Ollama. Make sure it's running with 'ollama serve'",
           variant: "destructive",
         });
       }
@@ -78,6 +83,23 @@ export const OllamaConfigCard = ({
       });
     } finally {
       setIsTestingConnection(false);
+    }
+  };
+
+  const handleNgrokUrlUpdate = (url: string) => {
+    if (ollamaConfig.updateNgrokUrl(url)) {
+      // If auto-detect is on and we're in production, update the current URL too
+      if (ollamaConfig.config.autoDetectUrl && ollamaConfig.config.isProduction) {
+        onOllamaUrlChange(url);
+      }
+    }
+  };
+
+  const handleUrlModeChange = (useRecommended: boolean) => {
+    if (useRecommended) {
+      const recommendedUrl = ollamaConfig.getRecommendedUrl();
+      onOllamaUrlChange(recommendedUrl);
+      ollamaConfig.updateCurrentUrl(recommendedUrl);
     }
   };
 
@@ -118,15 +140,78 @@ export const OllamaConfigCard = ({
           Configure your local Ollama instance for embeddings and LLM inference
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
+        {/* Environment Detection */}
+        <div className="p-4 bg-blue-50 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            {ollamaConfig.config.isProduction ? (
+              <Globe className="h-4 w-4 text-blue-600" />
+            ) : (
+              <Home className="h-4 w-4 text-blue-600" />
+            )}
+            <h4 className="text-sm font-medium text-blue-900">
+              Environment: {ollamaConfig.config.isProduction ? 'Production (Deployed)' : 'Development (Local)'}
+            </h4>
+          </div>
+          <p className="text-xs text-blue-800">
+            {ollamaConfig.config.isProduction 
+              ? 'You\'re running on a deployed site. Use ngrok to tunnel to your local Ollama instance.'
+              : 'You\'re running locally. You can connect directly to localhost Ollama.'
+            }
+          </p>
+        </div>
+
+        {/* ngrok Configuration for Production */}
+        {ollamaConfig.config.isProduction && (
+          <div className="space-y-3">
+            <Label htmlFor="ngrok-url" className="flex items-center gap-2">
+              <Globe className="h-4 w-4" />
+              ngrok Public URL
+            </Label>
+            <Input
+              id="ngrok-url"
+              value={ollamaConfig.config.ngrokUrl}
+              onChange={(e) => handleNgrokUrlUpdate(e.target.value)}
+              placeholder="https://abc123.ngrok.io"
+            />
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>• Start ngrok tunnel: <code>ngrok http 11434</code></p>
+              <p>• Copy the HTTPS URL from ngrok output</p>
+              <p>• Make sure Ollama is running: <code>ollama serve</code></p>
+            </div>
+          </div>
+        )}
+
+        {/* Auto URL Detection */}
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Auto-detect URL</Label>
+            <p className="text-xs text-muted-foreground">
+              Automatically use {ollamaConfig.config.isProduction ? 'ngrok URL' : 'localhost'} based on environment
+            </p>
+          </div>
+          <Switch
+            checked={ollamaConfig.config.autoDetectUrl}
+            onCheckedChange={(checked) => {
+              ollamaConfig.toggleAutoDetect(checked);
+              handleUrlModeChange(checked);
+            }}
+          />
+        </div>
+
+        {/* Manual URL Configuration */}
         <div className="space-y-2">
-          <Label htmlFor="ollama-url">Ollama URL</Label>
+          <Label htmlFor="ollama-url">Current Ollama URL</Label>
           <div className="flex gap-2">
             <Input
               id="ollama-url"
               value={ollamaUrl}
-              onChange={(e) => onOllamaUrlChange(e.target.value)}
-              placeholder="http://localhost:11434"
+              onChange={(e) => {
+                onOllamaUrlChange(e.target.value);
+                ollamaConfig.updateCurrentUrl(e.target.value);
+              }}
+              placeholder={ollamaConfig.config.isProduction ? "https://abc123.ngrok.io" : "http://localhost:11434"}
+              disabled={ollamaConfig.config.autoDetectUrl}
             />
             <Button 
               onClick={handleTestConnection} 
@@ -138,6 +223,14 @@ export const OllamaConfigCard = ({
               {isTestingConnection ? 'Testing...' : 'Test'}
             </Button>
           </div>
+          
+          {ollamaConfig.config.autoDetectUrl && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Info className="h-3 w-3" />
+              URL is automatically managed based on environment
+            </div>
+          )}
+
           {connectionStatus !== 'idle' && (
             <div className={`text-sm flex items-center gap-2 ${
               connectionStatus === 'connected' ? 'text-green-600' : 
@@ -147,11 +240,9 @@ export const OllamaConfigCard = ({
               {getConnectionStatusText()}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            Make sure Ollama is running with: <code>ollama serve</code>
-          </p>
         </div>
 
+        {/* Model Selection */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="embedding-model">Embedding Model</Label>
@@ -192,14 +283,28 @@ export const OllamaConfigCard = ({
           </div>
         </div>
 
+        {/* Troubleshooting Guide */}
         <div className="p-3 bg-blue-50 rounded-lg">
-          <h4 className="text-sm font-medium text-blue-900 mb-2">Troubleshooting Connection Issues:</h4>
-          <ul className="text-xs text-blue-800 space-y-1">
-            <li>• Ensure Ollama is running: <code>ollama serve</code></li>
-            <li>• Check if models are installed: <code>ollama list</code></li>
-            <li>• For CORS issues, consider running Ollama with proper headers</li>
-            <li>• Verify the URL is correct (usually http://localhost:11434)</li>
-          </ul>
+          <h4 className="text-sm font-medium text-blue-900 mb-2">
+            {ollamaConfig.config.isProduction ? 'Production Setup Guide:' : 'Development Setup Guide:'}
+          </h4>
+          
+          {ollamaConfig.config.isProduction ? (
+            <ul className="text-xs text-blue-800 space-y-1">
+              <li>• Install ngrok: <code>brew install ngrok</code> or download from ngrok.com</li>
+              <li>• Start Ollama: <code>ollama serve</code></li>
+              <li>• Create tunnel: <code>ngrok http 11434</code></li>
+              <li>• Copy the HTTPS URL (e.g., https://abc123.ngrok.io)</li>
+              <li>• Paste the URL above and test the connection</li>
+            </ul>
+          ) : (
+            <ul className="text-xs text-blue-800 space-y-1">
+              <li>• Ensure Ollama is running: <code>ollama serve</code></li>
+              <li>• Check if models are installed: <code>ollama list</code></li>
+              <li>• Verify the URL is correct (usually http://localhost:11434)</li>
+              <li>• For CORS issues, restart Ollama and try again</li>
+            </ul>
+          )}
         </div>
       </CardContent>
     </Card>
